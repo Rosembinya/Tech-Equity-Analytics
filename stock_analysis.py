@@ -20,10 +20,10 @@ def get_engine():
     return create_engine(f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}")
 
 def setup_database_schema(engine):
-    """Cleans up old structures and builds the schema with Primary Keys."""
-    print("Initializing database schema...")
+    """Initializes the database schema by dropping existing tables/views and creating new ones with constraints."""
+    print("--- Phase 1: Setting up Database Schema ---")
     with engine.connect() as conn:
-        # 1. Kill active sessions to prevent 'Table in use' errors
+        # 1. Terminate active sessions to allow dropping tables/views
         kill_sessions_sql = text(f"""
             SELECT pg_terminate_backend(pid) 
             FROM pg_stat_activity 
@@ -32,11 +32,11 @@ def setup_database_schema(engine):
         
         try:
             conn.execute(kill_sessions_sql)
-            # 2. Drop in correct order (View first!)
+            # 2. Drop existing tables and views if they exist
             conn.execute(text("DROP VIEW IF EXISTS v_stock_analysis CASCADE;"))
             conn.execute(text("DROP TABLE IF EXISTS raw_stocks CASCADE;"))
             
-            # 3. Create Tables with Constraints
+            # 3. Create tables with constraints
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS ticker_metadata (
                     ticker VARCHAR(10) PRIMARY KEY,
@@ -52,14 +52,37 @@ def setup_database_schema(engine):
                     PRIMARY KEY ("Date", "Ticker")
                 );
             """))
+
+            # 4. Seed ticker_metadata with Top 10 Tech Stocks if empty
+            check_meta = conn.execute(text("SELECT COUNT(*) FROM ticker_metadata")).scalar()
+            if check_meta == 0:
+                print("Seeding ticker_metadata with top 10 tech stocks...")
+                seed_data = [
+                    {'t': 'AAPL', 'n': 'Apple Inc.', 's': 'Technology Hadware'},
+                    {'t': 'MSFT', 'n': 'Microsoft Corp.', 's': 'Software'},
+                    {'t': 'NVDA', 'n': 'NVIDIA Corp.', 's': 'Semiconductors'},
+                    {'t': 'GOOGL', 'n': 'Alphabet Inc.', 's': 'Internet Services'},
+                    {'t': 'AMZN', 'n': 'Amazon.com Inc.', 's': 'Consumer Discretionary'},
+                    {'t': 'META', 'n': 'Meta Platforms Inc.', 's': 'Internet Services'},
+                    {'t': 'TSLA', 'n': 'Tesla Inc.', 's': 'Consumer Discretionary'},
+                    {'t': 'AVGO', 'n': 'Broadcom Inc.', 's': 'Semiconductors'},
+                    {'t': 'ORCL', 'n': 'Oracle Corp.', 's': 'Software'},
+                    {'t': 'TSM', 'n': 'Taiwan Semiconductor Manufacturing Co. Ltd.', 's': 'Semiconductors'}
+                ]
+                conn.execute(
+                    text("INSERT INTO ticker_metadata (ticker, company_name, sector) VALUES (:t, :n, :s)"),
+                    seed_data
+                )
+            
             conn.commit()
-            print("Schema cleanup and table creation complete.")
+            print("Database schema setup complete.")
         except Exception as e:
             print(f"Schema Setup Error: {e}")
             conn.execute(text("ROLLBACK;"))
 
 def extract_and_load_stocks(engine):
-    """Fetches data from yfinance and loads it into PostgreSQL."""
+    """Extracts stock data for tickers in the database, transforms it, and loads it into the raw_stocks table. Also creates an analytical view."""
+    print("\n--- Phase 2: Extracting, Transforming, and Loading Stock Data ---")
     try:
         # Dynamic ticker list from the database
         with engine.connect() as conn:
@@ -67,10 +90,10 @@ def extract_and_load_stocks(engine):
             TICKERS = [row[0] for row in result]
 
         if not TICKERS:
-            print("Error: No tickers found. Please seed 'ticker_metadata' table first.")
+            print("No tickers found in ticker_metadata. Seeding failed or empty.")
             return
 
-        print(f"Starting data extraction for: {TICKERS}")
+        print(f"Target Tickers: {TICKERS}")
         all_data = []
         
         for ticker in TICKERS:
@@ -95,10 +118,10 @@ def extract_and_load_stocks(engine):
             df.dropna(subset=['Price'], inplace=True)
 
             print(f"Uploading {len(df)} rows to 'raw_stocks'...")
-            # Use 'append' instead of 'replace' because setup_database_schema already handled the table creation
+            # Use method='multi' for batch inserts to improve performance
             df.to_sql('raw_stocks', engine, if_exists='append', index=False, method='multi')
 
-            # 4. Recreate the View with Analytics logic
+            # 5. Create analytical view with calculations
             with engine.connect() as conn:
                 print("Creating analytical view: v_stock_analysis")
                 view_query = text("""
@@ -122,12 +145,12 @@ def extract_and_load_stocks(engine):
                 """)
                 conn.execute(view_query)
                 conn.commit()
-            print("SUCCESS: Pipeline execution complete.")
+            print("\nSUCCESS: All data loaded and view created.")
 
     except Exception as e:
         print(f"\nPipeline Error: {e}")
 
 if __name__ == "__main__":
     db_engine = get_engine()
-    setup_database_schema(db_engine) # Build the structure
-    extract_and_load_stocks(db_engine) # Load the data
+    setup_database_schema(db_engine) 
+    extract_and_load_stocks(db_engine)
