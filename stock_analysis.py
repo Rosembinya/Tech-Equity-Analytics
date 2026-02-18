@@ -12,6 +12,7 @@ import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from datetime import datetime
 
 # Load variables from .env file
 load_dotenv()
@@ -83,6 +84,8 @@ def setup_database_schema(engine):
 def extract_and_load_stocks(engine):
     """Extracts stock data for tickers in the database, transforms it, and loads it into the raw_stocks table. Also creates an analytical view."""
     print("\n--- Phase 2: Extracting, Transforming, and Loading Stock Data ---")
+    
+    today = datetime.now().strftime('%Y-%m-%d')
     try:
         # Dynamic ticker list from the database
         with engine.connect() as conn:
@@ -99,7 +102,7 @@ def extract_and_load_stocks(engine):
         for ticker in TICKERS:
             try:
                 print(f"Downloading {ticker}...")
-                data = yf.download(ticker, start="2021-01-01", end="2026-01-17", progress=False)
+                data = yf.download(ticker, start="2021-01-01", end=today, progress=False)
                 
                 if not data.empty:
                     # Flatten MultiIndex and Clean
