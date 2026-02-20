@@ -76,10 +76,14 @@ requirements.txt: Python dependencies.
 
 .env.example: Template for local environment configuration.
 
+config.yaml: Contains all runtime parameters.
+
 Setup & Installation
 
 Clone the Repository: git clone https://github.com/Rosembinya/Tech-Equity-Analytics.git
 
 Install Dependencies: pip install -r requirements.txt
 
-Configure Environment: Rename .env.example to .env and provide your local PostgreSQL credentials.
+Configure Environment: Rename .env.example to .env and provide your local PostgreSQL credentials
+
+Adding new tickers: edit config.yaml
